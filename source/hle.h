@@ -8,6 +8,6 @@
 #define DATA_PATH "ux0:data/asphalt-audirs3/"
 #endif
 
-#define BUNDLE_PATH DATA_PATH "game_app/"
+#define BUNDLE_PATH DATA_PATH "AsphaltAudiRS3.app/"
 #define DOCS_PATH   DATA_PATH "saves/"
 #define LOGS_PATH   DATA_PATH "logs/"

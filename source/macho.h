@@ -50,3 +50,8 @@ uint32_t call_guest(void *fn, uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3
  * @brief Invokes a 6-argument guest function preserving r9 register.
  */
 uint32_t call_guest6(void *fn, uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, uint32_t a5);
+
+/**
+ * @brief Returns the primary entry point address discovered from LC_MAIN or LC_UNIXTHREAD.
+ */
+uintptr_t macho_entry(void);
