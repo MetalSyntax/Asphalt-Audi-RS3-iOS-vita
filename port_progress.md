@@ -101,3 +101,91 @@ Documentación completa y arquitectura en `PORTING_PLAN.md`.
 - [ ] Desplegar datos: `psvita-toolkit deploy --data`
 - [ ] Desplegar VPK: `psvita-toolkit deploy`
 - [ ] Iteración build-run-triage con logs en consola física.
+
+---
+
+## Hosttest ARM32 (Docker armel, sin consola) - 2026-11-19
+
+Resultado: el juego llega al **splash/título** ("ASPHALT RS3 / Touch to continue / (c) 2011 Gameloft") en el FBO del juego
+(glReadPixels -> `build/hosttest-data/evidence/fbo_2.png`, log en `evidence/hosttest_run.log`). Los vídeos de arranque
+(`LOGO_Gameloft_480x320.m4v`, `RS3_Emomodul_HD_iPhone.m4v`) se localizan y se "reproducen" (sceAvPlayer falso los salta).
+`sh hosttest/run.sh build && HOSTTEST_FRAME_S=4 sh hosttest/run.sh run 110` (imágenes `hosttest-*` propias).
+2026-11-23: el compuesto final 960x544 ya muestra el título girado a paisaje (`evidence/screen_title.png`). Salía negro
+porque el juego (GLES2) deja activos los atributos genéricos 0-2 y en el perfil de compatibilidad de Mesa el atributo 0
+sustituye a `glVertexPointer`: `gles_present` los desactiva durante el blit y los restaura. No se llegó a menús/juego.
+
+Cambios de fondo:
+- **Runtime sustituido por la familia común Gameloft iOS** (copiado de Gangstar-Rio-iOS-vita: foundation/uikit/objc/darwin/
+  gles/openal/movie/coretext/ios5 + `port_config.h`, `tools/ios_prep.py`, `nib_prep.py`, `gen_cxx.py`). El andamiaje anterior
+  (2400 líneas, sin `objc_msgSend`, sin nib, sin binds) no podía arrancar el juego; sigue en el historial de git.
+- `ux0_data/asphalt-audirs3/` ahora: `game_app/` (la .app), `rebase.bin`, `binds.bin`, `nib.txt` (MainWindow.nib ->
+  `Asphalt6AppDelegate` + `EAGLView`), `Documents/`, `logs/`. Se regenera con `tools/stage_data.sh` / `ios_prep.py --arch armv7`.
+- `tools/ios_prep.py` (binario iOS 4.2 no PIE, sin símbolos, con LC_DYLD_INFO): (1) mezcla los binds/rebases exactos de
+  LC_DYLD_INFO (superclase de las clases ObjC: sin ello `-[EAGLView layer]` no existía); (2) literales que apuntan al interior de
+  `__cstring` (ld funde sufijos de cadenas); (3) funciones huérfanas guardadas como callback (sin prólogo) se escanean y sus
+  literales se rebasean; (4) vtables con entradas hoja/thunks, ranuras nulas y la marca `0x6f75746c`.
+- El entry de LC_UNIXTHREAD era el del slice armv6 en la doc anterior (0xd119c); armv7 = 0xd051c, `main` = 0xd4fc8.
+- `foundation.c`: `NSBundle executablePath` (ruta estilo iOS; el juego la corta para su chdir), `NSURL initFileURLWithPath:`,
+  `NSString rangeOfString:options:`.
+- `darwin.c`: `pthread_cond_t` de Darwin son 28 bytes y la de glibc 48: pisaba `count/runnable` del Thread de Gameloft
+  (NULL deref en 0x594BB4); ahora la cond va en heap. `darwin_path`: ruta que termina en `.app` = bundle; bajo `HOSTTEST` rutas
+  `ux0:` absolutas y `/game/game_app/` (getcwd tras chdir por symlink) -> bundle.
+- `gles.c`: vuelca el shader que falla al compilar (diagnóstico). Hosttest: `gles2_fake.c` limpia el `#endif]` de
+  `file000351.dat` (PowerVR lo ignora, Mesa no; en la Vita habrá que comprobar si shacccg lo tolera).
+- `CMakeLists.txt` (Vita) alineado con Gangstar (fuentes y librerías). **No compilado para la Vita**, solo hosttest.
+
+## Consola, log 002 + dump (2026-11-23)
+
+- **Crash `UNDEFINED_INSTRUCTION` en 0x984788b8 (Mach-O 0x4788b8)**: `swp` de ARMv6 en el pool de spinlocks de libstdc++
+  (26 sitios, 0x478364..0x478c30); el Cortex-A9 de la Vita no ejecuta SWP. `patch.c` los cambia por un `B` a stubs
+  LDREX/STREX + DMB en la arena de thunks (`macho_alloc_code`). El hosttest (qemu) sí ejecuta SWP: por eso no salía ahí.
+- Videos: `sceIoOpen("data/x.m4v")` relativo daba 0x80010016 (sceIo ignora el chdir de newlib): `movie_play` lo hace absoluto.
+- Logo de Gameloft abajo a la derecha: `Default-Landscape.png` (iPad) lo trae así; `loading_image` lo recorta y lo centra.
+- Carga (ideas de Gangstar Rio): caché negativa en `d_fopen` para el bundle (glsl.config se pedía 2-6 veces por shader),
+  `-O3` y `CMAKE_C_FLAGS_DEBUG -O3` (el preset debug metía -O0), vitaGL `BUILD_ALWAYS` + `make clean`.
+- Hosttest: título a los ~22 s; `run.sh` por defecto 120 s con `timeout -k 10` (una corrida quedó colgada en el
+  volcado de pilas del SIGTERM); barra de carga activa también en el hosttest (`evidence/loading_logo.png`).
+- Log 005 (consola): el parche `swp` funciona (26 sitios). La pantalla de carga tapaba la de Audi en cada carga: ahora
+  `Default-Landscape.png` (logo abajo a la derecha, como iOS) solo hasta el primer frame del juego, sin barra ni
+  `load_count.txt`. Pendiente: videos "sin memoria para frames (1 MB): 0x80024302"; el juego presenta con 0 draws.
+
+## Log 006 — primer ingame; crash PREFETCH_ABORT pc 0x00249edc
+- Causa: tabla de structs {id, fn, ...} en __data (0x74a0f0, paso 20) con punteros a funciones hoja sin prólogo
+  (`mov r0,#3; bx lr`). La heurística de `tools/ios_prep.py` las dejó como `data->text-nofunc` (sin rebase): el
+  `blx r2` saltó a la dirección sin slide. Fix: un data->text dudoso se acepta si la misma columna del struct
+  (paso 8..32) ya tiene un puntero a código aceptado y el destino es ARM AL tras un retorno/salto. +303 rebases
+  (vtables y punteros a miembro), 0 quitados. `rebase.bin` regenerado y subido.
+- Extras de Ferrari GT: menú de video SELECT+START (`options.c`, `font8x8.c`): tamaño (aspecto/pantalla completa),
+  filtro sharp bilinear, MSAA 2x/4x (al reiniciar), rotación; se guarda en `options.txt` (reemplaza rotation.txt).
+  Probado en hosttest (abre/cierra, sharp bilinear 320x480 x2).
+- Pendiente: errores gráficos en los autos (falta captura). Faltan en los .dat las texturas
+  `*_Car_Body_Reflection_ForShader.png` (el juego prueba variantes); películas: sin memoria para frames.
+
+## Log 007 — mismo crash (tabla de estados 0x74a0f0, entradas 22 y 30) + autos con bloques + sin sonido
+- Crash pc 0x00249fec: dos handlers más de la tabla quedaron sin rebase porque la palabra anterior al destino es un
+  literal que el escaneo no registró. `ios_prep.py`: palabra previa que no es instrucción ARM AL cuenta como fin de
+  función. +2 rebases (exactamente esas dos); la tabla de 40 estados queda completa.
+- Sonido: `coreaudio.c` (AudioUnit RemoteIO -> sceAudioOut, copia probada de Gangstar Rio) no se compilaba; el juego
+  mezcla todo (música y efectos) por ahí. Agregado a CMake e imports (hilo en núcleos 1-2, CPU_HELPERS). Hosttest:
+  "AudioUnit: 44100 Hz, 2 channels, 16 bits".
+- Autos con bloques (captura 2026-11-23-153604): se quitó DRAW_SPEEDHACK=2 de vitaGL (la GPU leía sin copia los
+  arrays de vértices que el motor reusa por pieza). Hipótesis por analogía con Asphalt 6 (Bug #030); confirmar en
+  consola. Descartado: precisión mediump (vitaGL no usa half), offsets de mips PVRTC, sesgo de texture2D.
+
+## Log 008 — sin crash, sonido OK; autos todavía con bloques; controles
+- DRAW_SPEEDHACK no era la causa (y bajaba de ~55 a ~30 fps): restaurado `DRAW_SPEEDHACK=2`.
+- Hosttest como referencia: decodificador PVRTC 4bpp por software en `hosttest/vitagl_fake.c` (Mesa no tiene PVRTC;
+  antes pista y reflejos salían negros) + taps del log 008 convertidos a pantalla para llegar a carrera en <120 s.
+  En el hosttest el auto se ve bien (rojo claro brillante) => el fallo es propio de vitaGL/GXM.
+- Causa encontrada: el shader del auto (`file000467` VS + `file000157` FS) declara 11 varyings y GXM tiene 10
+  TEXCOORD; vitaGL (NO_DEBUG oculta el "TEXCOORD overflow") metía el 11.º en TEXCOORD9 junto con vCoord0 (UV de la
+  carrocería) => trozos del atlas (asientos) y bandas. Es el único shader del juego con >10. Fix en `gles_init`:
+  `vglAddSemanticBindingHint` de vLightAmbient/vLightDiffuse a COLOR (colores [0,1]) => 9 TEXCOORD.
+  La caché de vitaGL se indexa por el GLSL original: ahora vive en `ux0:data/shader_cache/PSVAUDIRS-sem1`
+  (subir el sufijo si cambian los bindings). La vieja `ux0:data/shader_cache/PSVAUDIRS` se puede borrar.
+- vitaGL `change_cull_mode`: glCullFace(GL_FRONT) no dibujaba nada (no_polygons_mode); ahora = BACK con winding
+  invertido. El juego no usa GL_FRONT (verificado), pero queda corregido.
+- Controles: `controls.txt` por defecto (R gas, L/□ freno, X nitro, ○ gas alt., START pausa; coordenadas sacadas de
+  la captura) + remapeo en el menú SELECT+START (sección CONTROLS, izq/der cambia el botón, se guarda en
+  controls.txt con la etiqueta de la acción). Cruceta izq/der = inclinación digital si no está asignada.
+  MAX_BIND 8 (uikit MAX_TOUCH 11). Probado en hosttest: los botones tocan EAGLView y el menú se ve bien.

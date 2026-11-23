@@ -1,0 +1,9 @@
+# Botón x y acción (coordenadas de lo que se ve, 480x320 apaisado). Se remapea con SELECT+START.
+# Botones: CROSS CIRCLE SQUARE TRIANGLE LTRIGGER RTRIGGER START SELECT UP DOWN LEFT RIGHT
+# Stick izquierdo / cruceta izq-der = inclinación (acelerómetro).
+RTRIGGER 348 283 Gas (right pedal)
+LTRIGGER 55 279 Brake (left pedal)
+CROSS 435 250 Nitro
+SQUARE 55 279 Brake (alt)
+CIRCLE 348 283 Gas (alt)
+START 17 19 Pause

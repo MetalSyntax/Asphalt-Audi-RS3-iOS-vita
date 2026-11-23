@@ -1,62 +1,95 @@
 Binario: ux0_data/asphalt-audirs3/AsphaltAudiRS3.app/AsphaltAudiRS3 (armv7)
 FairPlay cryptid: 0 (descifrado)
 Rango imagen: 0x1000-0x7c1000
-Rebase: 8529 palabras -> ux0_data/asphalt-audirs3/rebase.bin
-  __cfstring           cstr           621
-  __const              cstr           2737
-  __const              func           387
-  __const              interior       73
-  __const              sym            1215
-  __data               cstr           747
-  __data               interior       325
-  __data               sym            29
-  __nl_symbol_ptr      local          577
-  __objc_classlist     interior       38
-  __objc_classrefs     interior       29
-  __objc_const         cstr           437
-  __objc_const         interior       570
-  __objc_data          interior       124
-  __objc_methname      bss-interior   1
-  __objc_methname      cstr           1
-  __objc_methname      interior       2
-  __objc_protolist     interior       16
-  __objc_selrefs       cstr           1
-  __objc_superrefs     interior       32
-  __program_vars       interior       4
-  __symbol_stub4       la_ptr         563
-Rechazadas (en rango, sin símbolo válido): {'__const': 38718, '__objc_methname': 330, '__objc_methtype': 46, '__objc_classname': 10, '__stub_helper': 385, '__gcc_except_tab': 745, '__program_vars': 1, '__mod_init_func': 432, '__objc_const': 3748, '__objc_selrefs': 800, '__data': 583}
-Objetos descartados (tablas mixtas): 271
-  __ZTV6Thread ok=3663 malas=25059
-  __ZTVN8CryptoPP16ZlibDecompressor27UnsupportedPresetDictionaryE ok=282 malas=1622
-  __ZTV9SingletonI14TrafficManagerE ok=119 malas=1006
-  __ZTCN6glitch5scene23CBatchGridSceneNodeTmplINS0_15CBatchSceneNodeENS0_10CBatchMeshEEE0_NS_2io26IAttributeExchangingObjectE ok=84 malas=897
-  __ZTI9Attribute ok=75 malas=535
-  __ZTV10DataPacket ok=60 malas=118
-  __ZTV9SingletonI12T_SWFManagerE ok=59 malas=100
-  __ZTV9SingletonI13ResultManagerE ok=53 malas=272
-  __ZTVN8CryptoPP9FileStore7OpenErrE ok=45 malas=554
-  __ZTVN8CryptoPP10BufferlessINS_22BufferedTransformationEEE ok=43 malas=192
-  __ZTV9SingletonI14NavLineManagerE ok=38 malas=376
-  __ZTIN6glitch5video17IMaterialCallbackE ok=34 malas=342
-  __ZTVN8CryptoPP22CustomFlushPropagationINS_4SinkEEE ok=29 malas=164
-  __ZTV9SingletonI12EventManagerE ok=28 malas=197
-  __ZTI23GLXPlayerSocketObserver ok=28 malas=75
-  __ZTI15JumpCamPosition ok=23 malas=54
-  __ZTS6Thread ok=21 malas=1625
-  __ZTV9SingletonI13ScriptManagerE ok=21 malas=91
-  __ZTI12NetStructIntILj32EE ok=21 malas=172
-  __DATA.__data ok=18 malas=19
-  __ZTISs ok=16 malas=124
-  __ZTVN8CryptoPP16HashInputTooLongE ok=15 malas=130
-  __ZTIN8CryptoPP27AlgorithmParametersTemplateIPKhEE ok=14 malas=164
-  __ZTI14CCustomControl ok=12 malas=21
-  __ZTV9SingletonI13TrophyManagerE ok=12 malas=90
-  __ZTVN8CryptoPP6Gunzip9HeaderErrE ok=12 malas=123
-  __ZTIN8CryptoPP13AutoSignalingINS_22BufferedTransformationEEE ok=12 malas=61
-  __ZTVN6glitch17IReferenceCountedE ok=11 malas=26
-  __ZTIN6gllive23GLXPlayerSocketObserverE ok=11 malas=58
-  __ZTVN8CryptoPP24EqualityComparisonFilter16MismatchDetectedE ok=10 malas=33
-Relocs externas: 0; imports únicos: 1268
+Funciones identificadas en __text: 22875
+Rebase: 68114 palabras -> ux0_data/asphalt-audirs3/rebase.bin
+  __cfstring             ptr            : 621
+  __const                ptr            : 43009
+  __data                 ptr            : 1619
+  __data                 skip-not-func  : 33
+  __mod_init_func        init_fn        : 432
+  __nl_symbol_ptr        local          : 577
+  __objc_classlist       ptr            : 38
+  __objc_classrefs       ptr            : 29
+  __objc_const           ptr            : 3992
+  __objc_const           skip-not-func  : 69
+  __objc_data            ptr            : 124
+  __objc_protolist       ptr            : 16
+  __objc_selrefs         ptr            : 801
+  __objc_superrefs       ptr            : 32
+  __symbol_stub4         la_ptr         : 563
+  __text_jumptable       entry          : 3267
+  __text_lit             __bss          : 566
+  __text_lit             __cfstring     : 8
+  __text_lit             __common       : 427
+  __text_lit             __const        : 4863
+  __text_lit             __cstring      : 4474
+  __text_lit             __data         : 2143
+  __text_lit             __gcc_except_tab: 20
+  __text_lit             __nl_symbol_ptr: 1961
+  __text_lit             __objc_classrefs: 76
+  __text_lit             __objc_const   : 170
+  __text_lit             __objc_selrefs : 401
+  __text_lit             __objc_superrefs: 6
+  __text_lit             const_skip_num : 117
+  __text_lit             func           : 629
+  __text_lit             func_skip_num  : 1
+Literales numéricos que coinciden con una función (no reubicados): 54
+  slot 0x33f44c = 0x33d590 (3397008)
+  slot 0x367d60 = 0x6a38d8 (6961368)
+  slot 0x3749a0 = 0x6a3d38 (6962488)
+  slot 0x3ec978 = 0x6ac728 (6997800)
+  slot 0x3fa980 = 0x6ac8e4 (6998244)
+  slot 0x3faf48 = 0x6ac8e4 (6998244)
+  slot 0x3faf4c = 0x6ac844 (6998084)
+  slot 0x43adf8 = 0x6acfb0 (6999984)
+  slot 0x46ace4 = 0x6ad9c0 (7002560)
+  slot 0x46aeac = 0x6ad9c0 (7002560)
+  slot 0x46b70c = 0x6ad9c0 (7002560)
+  slot 0x480d00 = 0x6adfb8 (7004088)
+  slot 0x481acc = 0x6adfb8 (7004088)
+  slot 0x4e6b50 = 0x6aeab0 (7006896)
+  slot 0x4fccd0 = 0x6af67c (7009916)
+  slot 0x503e64 = 0x6af20c (7008780)
+  slot 0x50bab8 = 0x6af61c (7009820)
+  slot 0x50bac4 = 0x6af220 (7008800)
+  slot 0x51159c = 0x6af9a0 (7010720)
+  slot 0x51a12c = 0x6afc90 (7011472)
+  slot 0x51a134 = 0x6af9b4 (7010740)
+  slot 0x53bf00 = 0x6b005c (7012444)
+  slot 0x53d504 = 0x6b006c (7012460)
+  slot 0x5407b0 = 0x6b007c (7012476)
+  slot 0x55ae68 = 0x6b00f4 (7012596)
+  slot 0x55af20 = 0x6b00f4 (7012596)
+  slot 0x55b048 = 0x6b00f4 (7012596)
+  slot 0x55b364 = 0x6b0108 (7012616)
+  slot 0x55b774 = 0x6b00f4 (7012596)
+  slot 0x55c868 = 0x6b00f4 (7012596)
+  slot 0x55c924 = 0x6b00f4 (7012596)
+  slot 0x55ca3c = 0x6b00f4 (7012596)
+  slot 0x55cb34 = 0x6b00f4 (7012596)
+  slot 0x55d8b8 = 0x6b00f4 (7012596)
+  slot 0x560c74 = 0x6b00f4 (7012596)
+  slot 0x564054 = 0x6b00f4 (7012596)
+  slot 0x567658 = 0x6b00f4 (7012596)
+  slot 0x5690e0 = 0x6b00f4 (7012596)
+  slot 0x56ab48 = 0x6b00f4 (7012596)
+  slot 0x56c570 = 0x6b00f4 (7012596)
+  slot 0x571240 = 0x6b00f4 (7012596)
+  slot 0x573284 = 0x6b00f4 (7012596)
+  slot 0x573c68 = 0x6b00f4 (7012596)
+  slot 0x5a1260 = 0x6b15a0 (7017888)
+  slot 0x5aa140 = 0x6b1b8c (7019404)
+  slot 0x5b6e1c = 0x6b1ba4 (7019428)
+  slot 0x5e4f70 = 0x6b399e (7027102)
+  slot 0x5e4f9c = 0x6b399e (7027102)
+  slot 0x5e54ac = 0x6b4a6f (7031407)
+  slot 0x5e54b0 = 0x6b4a71 (7031409)
+  slot 0x5f63c4 = 0x6c5668 (7100008)
+  slot 0x5fb4ec = 0x6c56a4 (7100068)
+  slot 0x5fb4f4 = 0x6c56b4 (7100084)
+  slot 0x64c96c = 0x6c6508 (7103752)
+Imports dinámicos únicos: 1268
   _ABAddressBookCopyArrayOfAllPeople
   _ABAddressBookCreate
   _ABMultiValueAddValueAndLabel

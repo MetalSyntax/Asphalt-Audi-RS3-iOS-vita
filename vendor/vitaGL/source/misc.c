@@ -204,8 +204,13 @@ static enum {
 void change_cull_mode() {
 	// Setting proper cull mode in sceGxm depending to current openGL machine state
 	if (cull_face_state) {
+		// Port: glCullFace(GL_FRONT) caía en "no_polygons_mode" (no dibujaba nada). Cull FRONT == cull BACK con
+		// el winding invertido (Asphalt Audi RS3: media carrocería/vidrios invisibles, log 008).
+		GLenum front_face = gl_front_face, cull_mode = gl_cull_mode;
+		if (cull_mode == GL_FRONT)
+			cull_mode = GL_BACK, front_face = front_face == GL_CW ? GL_CCW : GL_CW;
 #ifdef HAVE_UNFLIPPED_FBOS
-		switch (gl_front_face + gl_cull_mode) {
+		switch (front_face + cull_mode) {
 		case GL_CW_BACK:
 			no_polygons_mode = GL_FALSE;
 			sceGxmSetCullMode(gxm_context, SCE_GXM_CULL_CCW);
@@ -219,7 +224,7 @@ void change_cull_mode() {
 			break;
 		}
 #else
-		switch (gl_front_face + gl_cull_mode + is_rendering_display) {
+		switch (front_face + cull_mode + is_rendering_display) {
 		case GL_CW_BACK:
 		case GL_CCW_BACK_DISPLAY:
 			no_polygons_mode = GL_FALSE;

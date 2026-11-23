@@ -49,3 +49,7 @@ __pycache__/
 .idea/
 *.swp
 cmake-build-*/
+
+# Capturas de la consola (contenido del juego) y respaldos
+screenshots/
+*.bak

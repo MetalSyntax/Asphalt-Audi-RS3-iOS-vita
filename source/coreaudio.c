@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "hle.h"
 #include "imports.h"
 #include "log.h"
 #include "macho.h"
@@ -138,7 +139,7 @@ static int au_Start(audio_unit *u) {
     if (u->running || !u->proc)
         return 0;
     u->running = 1;
-    u->thread = sceKernelCreateThread("coreaudio", audio_thread, 0x10000100, 256 * 1024, 0, 0, NULL);
+    u->thread = sceKernelCreateThread("coreaudio", audio_thread, 0x10000100, 256 * 1024, 0, CPU_HELPERS, NULL);
     sceKernelStartThread(u->thread, sizeof(u), &u);
     return 0;
 }
@@ -182,8 +183,6 @@ static int as_GetProperty(uint32_t id, uint32_t *size, void *data) {
     return 0;
 }
 
-#define F(name, fn) {"_" #name, (uintptr_t)(fn)}
-
 const import_entry coreaudio_imports[] = {
     F(AudioComponentFindNext, au_FindNext), F(AudioComponentInstanceNew, au_InstanceNew),
     F(AudioComponentInstanceDispose, au_Dispose), F(AudioUnitSetProperty, au_SetProperty),
@@ -194,4 +193,4 @@ const import_entry coreaudio_imports[] = {
     // imported via __nl_symbol_ptr (function pointer): requires code stub, not data
     F(AudioSessionRemovePropertyListenerWithUserData, ok),
 };
-const int coreaudio_imports_count = sizeof(coreaudio_imports) / sizeof(coreaudio_imports[0]);
+TABLE_END(coreaudio)

@@ -23,6 +23,11 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
   add_definitions(-DDEBUG_LOADER)
 endif()
 
+# El preset debug (psvita-toolkit build) añade -O0 tras el -O2: el runtime entero (objc_msgSend, wrappers de libc/GL)
+# corría sin optimizar (Gangstar Rio, log 028: 3-8 fps).
+set(CMAKE_C_FLAGS_DEBUG "-O3 -g")
+set(CMAKE_ASM_FLAGS_DEBUG "-g")
+
 ## vitaGL vendorizada con compilación en softfp (OBLIGATORIO para evitar pantalla negra en PS Vita)
 set(VITAGL_VENDOR_DIR ${CMAKE_CURRENT_SOURCE_DIR}/vendor/vitaGL)
 set(VITAGL_MAKE_FLAGS_STR "SOFTFP_ABI=1 NO_DEBUG=1 HAVE_SHADER_CACHE=1 NO_SPLASHSCREEN=1 HAVE_GLSL_UBOS=1 SAMPLERS_SPEEDHACK=1 DRAW_SPEEDHACK=2")
@@ -32,8 +37,10 @@ ExternalProject_Add(
   vitaGL_vendored
   SOURCE_DIR ${VITAGL_VENDOR_DIR}
   BUILD_IN_SOURCE 1
+  BUILD_ALWAYS 1 # sin esto los cambios en vendor/vitaGL/source no se recompilan
   CONFIGURE_COMMAND ""
-  BUILD_COMMAND make ${VITAGL_MAKE_FLAGS}
+  # make clean: el Makefile no sigue headers ni flags; un .o viejo con otro layout de shared.h corrompe todo.
+  BUILD_COMMAND make clean COMMAND make ${VITAGL_MAKE_FLAGS}
   BUILD_BYPRODUCTS ${VITAGL_VENDOR_DIR}/libvitaGL.a
   INSTALL_COMMAND ""
 )
@@ -49,7 +56,7 @@ include_directories(
 
 # -ffixed-r9: el código de iOS trata r9 como temporal sin guardarlo. Si el loader usara r9,
 # cualquier llamada a/desde el juego lo podría corromper.
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wl,-q -O2 -g -ffixed-r9 -mfloat-abi=softfp -DSKIP_SPLASHSCREEN -Wall -Wno-unused-function -D_GNU_SOURCE")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wl,-q -O3 -g -ffixed-r9 -mfloat-abi=softfp -DSKIP_SPLASHSCREEN -Wall -Wno-unused-function -Wno-pointer-sign -D_GNU_SOURCE")
 set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} -ffixed-r9 -mfloat-abi=softfp")
 
 add_executable(${CMAKE_PROJECT_NAME}
@@ -61,20 +68,36 @@ add_executable(${CMAKE_PROJECT_NAME}
   source/darwin.c
   source/darwin_printf.c
   source/objc.c
+  source/foundation.c
+  source/uikit.c
+  source/movie.c
+  source/coreaudio.c
+  source/options.c
+  source/font8x8.c
+  source/coretext.c
   source/gles.c
   source/vitagl_no_splash.c
-  source/coreaudio.c
+  source/openal.c
+  source/audio.c
   source/input.c
   source/cgbi.c
+  source/cxx_imports.c
+  source/ios5.c
   source/patch.c
 )
 
 target_link_libraries(${CMAKE_PROJECT_NAME}
+  -Wl,--wrap=free # darwin.c: free() de la imagen del juego (string vacío de libstdc++)
   -Wl,--whole-archive pthread -Wl,--no-whole-archive
   vitaGL_vendored_lib
   vitashark
   SceShaccCgExt
+  openal
+  vorbisfile
+  vorbis
+  ogg
   stdc++
+  supc++
   taihen_stub
   SceShaccCg_stub
   mathneon
@@ -95,9 +118,12 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
   SceCommonDialog_stub
   SceAppUtil_stub
   SceAudio_stub
+  SceAudioIn_stub
   SceAvPlayer_stub
   SceIofilemgr_stub
   SceIme_stub
+  SceNet_stub
+  SceSqlite_stub
 )
 
 vita_create_self(eboot.bin ${CMAKE_PROJECT_NAME} UNSAFE NOASLR)
