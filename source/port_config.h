@@ -13,3 +13,6 @@
 #define PORT_SCREEN_W 320
 #define PORT_SCREEN_H 480
 #define PORT_SCREEN_SCALE 1.0f
+// Controles táctiles que gles.c no dibuja en carrera (options.txt hud=1), en coordenadas de controls.txt (480x320):
+// freno, gas, nitro, pausa. Medidas de la captura 2026-11-24-085618 con margen.
+#define PORT_HUD_ZONES {{8, 244, 104, 320}, {300, 248, 396, 320}, {396, 206, 476, 294}, {0, 0, 38, 40}}

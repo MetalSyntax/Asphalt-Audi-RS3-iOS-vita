@@ -10,6 +10,7 @@ void gles_present_movie(unsigned tex, int w, int h); // un frame de video (movie
 void gles_present_loading(float frac, unsigned tex, int w, int h); // imagen (tex 0 = negro) + barra de carga (0..1)
 extern int gles_api; // 1 = GLES1 (FFP), 2 = GLES2 (EAGLContext initWithAPI:)
 void gles_bind_screen(void);                // GLKView bindDrawable                   // presentRenderbuffer:
+int gles_in_race(void);                    // el último frame dibujó la carrera (carrocería file000345)
 int gles_rotation(void);                   // 0 sin girar, 1 landscape-right, 2 landscape-left
 void gles_dest_rect(int *x, int *y, int *w, int *h);
 uint32_t gles_get_draw_calls(void);

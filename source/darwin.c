@@ -34,6 +34,7 @@ extern void *__dynamic_cast(const void *, const void *, const void *, long); // 
 #include "imports.h"
 #include "log.h"
 #include "macho.h"
+#include "options.h"
 
 // ---------------------------------------------------------------- rutas
 
@@ -621,8 +622,8 @@ static darwin_tm *d_localtime_r(const time_t *t, darwin_tm *out) {
     return conv_tm(localtime_r(t, &tmp), out);
 }
 
-static const char *machine = PORT_DEVICE_MACHINE;
 static int d_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
+    const char *machine = options_machine();
     if (!strcmp(name, "hw.machine")) {
         size_t len = strlen(machine) + 1;
         if (oldp && *oldlenp >= len)
@@ -656,7 +657,7 @@ static int d_uname(char *u) {
     strcpy(u + 256, "vita");
     strcpy(u + 512, "9.4.1");
     strcpy(u + 768, "Darwin Kernel Version 9.4.1");
-    strcpy(u + 1024, machine);
+    strcpy(u + 1024, options_machine());
     return 0;
 }
 static int d_gethostname(char *n, size_t len) {

@@ -362,45 +362,152 @@ static void trace_draw(const char *fn, GLenum mode, int count, int first) {
            pm[12], mv[0], mv[5], mv[12], mv[13], err0);
 }
 
-// ponytail: diagnóstico GLES2 (log 012: media carrocería invisible). Un frame de carrera cada 900 presentaciones
-// (4 veces): estado de cada draw. Quitar al resolver los autos.
-static int trace2, frame_draws;
-static void trace2_draw(const char *fn, GLenum mode, int count, GLenum type, const void *idx) {
-    frame_draws++;
-    if (!trace2 || gles_api != 2)
-        return;
-    GLint prog = 0, tex = 0, ebo = 0, bs = 0, bd = 0, ff = 0, cm = 0, df = 0, at = 0;
-    GLboolean dm = 0;
-    glGetIntegerv(GL_CURRENT_PROGRAM, &prog);
-    glGetIntegerv(GL_TEXTURE_BINDING_2D, &tex);
-    glGetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &ebo);
-    glGetIntegerv(GL_BLEND_SRC_RGB, &bs);
-    glGetIntegerv(GL_BLEND_DST_RGB, &bd);
-    glGetIntegerv(GL_FRONT_FACE, &ff);
-    glGetIntegerv(GL_CULL_FACE_MODE, &cm);
-    glGetIntegerv(GL_DEPTH_FUNC, &df);
-    glGetIntegerv(GL_ACTIVE_TEXTURE, &at);
-    glGetBooleanv(GL_DEPTH_WRITEMASK, &dm);
-    char a[160] = "", *w = a;
-    for (int i = 0; i < 4; i++) {
-        GLint en = 0, vb = 0, st = 0, sz = 0;
-        void *ptr = NULL;
-        glGetVertexAttribiv(i, GL_VERTEX_ATTRIB_ARRAY_ENABLED, &en);
-        if (!en)
-            continue;
-        glGetVertexAttribiv(i, GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING, &vb);
-        glGetVertexAttribiv(i, GL_VERTEX_ATTRIB_ARRAY_STRIDE, &st);
-        glGetVertexAttribiv(i, GL_VERTEX_ATTRIB_ARRAY_SIZE, &sz);
-        glGetVertexAttribPointerv(i, GL_VERTEX_ATTRIB_ARRAY_POINTER, &ptr);
-        w += snprintf(w, a + sizeof(a) - w, " a%d[%dx st%d vbo%d %p]", i, sz, st, vb, ptr);
+// ---------------------------------------------------------------- controles en pantalla ocultos
+// Pedales, nitro y pausa los dibuja el juego en 2D (sueltos con file000441, pulsados con otro shader). Con
+// opt_hud_hidden, en los frames de carrera (se usó la carrocería file000345) no se dibujan los triángulos de matriz
+// ortográfica que caen enteros en una zona PORT_HUD_ZONES (+25%) (lógicas 480x320 de controls.txt). Siguen respondiendo.
+// La posición en pantalla sale de la WorldViewProjectionMatrix que sube el juego (vitaGL no tiene glGetUniformfv).
+enum { K_RACE = 2 };
+static uint8_t sh_kind[4096], prog_kind[4096];
+static GLuint cur_prog;
+static int race_frame, last_race;
+int gles_in_race(void) { return last_race; }
+static struct {
+    GLuint prog;
+    GLint loc, pos;
+    int valid;
+    float m[16];
+} hud_prog[64]; // todo programa con WorldViewProjectionMatrix
+static int nhud_prog;
+#ifdef PORT_HUD_ZONES
+static const float hud_zones[][4] = PORT_HUD_ZONES; // x0, y0, x1, y1
+#define NZONES (int)(sizeof(hud_zones) / sizeof(hud_zones[0]))
+#endif
+
+static void g_glUseProgram(GLuint p) {
+    cur_prog = p;
+    if (p < sizeof(prog_kind) && prog_kind[p] == K_RACE)
+        race_frame = 1;
+    glUseProgram(p);
+}
+static GLint g_glGetUniformLocation(GLuint p, const GLchar *name) {
+    GLint loc = glGetUniformLocation(p, name);
+    if (loc < 0 || strcmp(name, "WorldViewProjectionMatrix"))
+        return loc;
+    int i = 0;
+    while (i < nhud_prog && hud_prog[i].prog != p)
+        i++;
+    if (i == nhud_prog && nhud_prog < (int)(sizeof(hud_prog) / sizeof(hud_prog[0])))
+        hud_prog[nhud_prog].prog = p, hud_prog[nhud_prog++].pos = -1;
+    if (i < nhud_prog)
+        hud_prog[i].loc = loc;
+    return loc;
+}
+static void g_glUniformMatrix4fv(GLint loc, GLsizei n, GLboolean tr, const GLfloat *v) {
+    glUniformMatrix4fv(loc, n, tr, v);
+    for (int i = 0; i < nhud_prog; i++)
+        if (hud_prog[i].prog == cur_prog && hud_prog[i].loc == loc)
+            memcpy(hud_prog[i].m, v, sizeof(hud_prog[i].m)), hud_prog[i].valid = 1;
+}
+
+#ifdef PORT_HUD_ZONES
+// Vértice -> zona (o -1). Clip -> vista de iOS (y hacia abajo) -> lógicas: inverso de to_view (input.c).
+static int hud_zone(const float *m, const float *v) {
+    float w = m[3] * v[0] + m[7] * v[1] + m[11] * v[2] + m[15];
+    if (w == 0)
+        return -1;
+    float vx = (m[0] * v[0] + m[4] * v[1] + m[8] * v[2] + m[12]) / w * 0.5f + 0.5f;
+    float vy = 0.5f - (m[1] * v[0] + m[5] * v[1] + m[9] * v[2] + m[13]) / w * 0.5f;
+    int r = gles_rotation();
+    float nx = r == 1 ? vy : r == 2 ? 1 - vy : vx, ny = r == 1 ? 1 - vx : r == 2 ? vx : vy;
+    float x = nx * (r ? 480 : 320), y = ny * (r ? 320 : 480);
+    for (int z = 0; z < NZONES; z++) { // +25% por lado: el sprite pulsado es más grande que el suelto
+        float mx = (hud_zones[z][2] - hud_zones[z][0]) / 4, my = (hud_zones[z][3] - hud_zones[z][1]) / 4;
+        if (x >= hud_zones[z][0] - mx && x <= hud_zones[z][2] + mx && y >= hud_zones[z][1] - my &&
+            y <= hud_zones[z][3] + my)
+            return z;
     }
-    l_info("T2 %s m%d n%d t0x%X ebo%d i%p | prog %d tex%d u%d | B%d %X/%X | C%d %X ff %X | D%d %X m%d |%s", fn, mode,
-           count, type, ebo, idx, prog, tex, at - GL_TEXTURE0, glIsEnabled(GL_BLEND), bs, bd, glIsEnabled(GL_CULL_FACE),
-           cm, ff, glIsEnabled(GL_DEPTH_TEST), df, dm, a);
+    return -1;
+}
+#endif
+
+// 1 = ya dibujado (filtrado o vacío), 0 = dibujar normal.
+static int hud_draw(GLenum mode, GLsizei count, GLenum type, const void *idx) {
+#ifdef PORT_HUD_ZONES
+    if (!opt_hud_hidden || !race_frame || mode != GL_TRIANGLES)
+        return 0;
+    int h = -1;
+    for (int i = 0; i < nhud_prog; i++)
+        if (hud_prog[i].prog == cur_prog && hud_prog[i].valid)
+            h = i;
+    if (h < 0 || hud_prog[h].m[3] != 0 || hud_prog[h].m[7] != 0 || hud_prog[h].m[11] != 0) // solo 2D (ortográfica)
+        return 0;
+    if (hud_prog[h].pos < 0)
+        hud_prog[h].pos = glGetAttribLocation(cur_prog, "Position");
+    if (hud_prog[h].pos < 0)
+        hud_prog[h].pos = glGetAttribLocation(cur_prog, "Vertex");
+    GLint at = hud_prog[h].pos, on = 0, vb = 0, sz = 0, ty = 0, st = 0;
+    void *ptr = NULL;
+    if (at < 0)
+        return 0;
+    glGetVertexAttribiv(at, GL_VERTEX_ATTRIB_ARRAY_ENABLED, &on);
+    glGetVertexAttribiv(at, GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING, &vb);
+    glGetVertexAttribiv(at, GL_VERTEX_ATTRIB_ARRAY_SIZE, &sz);
+    glGetVertexAttribiv(at, GL_VERTEX_ATTRIB_ARRAY_TYPE, &ty);
+    glGetVertexAttribiv(at, GL_VERTEX_ATTRIB_ARRAY_STRIDE, &st);
+    glGetVertexAttribPointerv(at, GL_VERTEX_ATTRIB_ARRAY_POINTER, &ptr);
+    const uint8_t *vbase = vb ? (const uint8_t *)vbo_data(vb) : NULL;
+    vbase = vb ? (vbase ? vbase + (uintptr_t)ptr : NULL) : ptr;
+    const uint8_t *ib = bound_element_buffer ? (const uint8_t *)vbo_data(bound_element_buffer) : NULL;
+    ib = bound_element_buffer ? (ib ? ib + (uintptr_t)idx : NULL) : idx;
+    if (!on || ty != GL_FLOAT || sz < 2 || !vbase || !ib || type == GL_UNSIGNED_BYTE)
+        return 0;
+    if (!st)
+        st = sz * 4;
+    int isz = type == GL_UNSIGNED_INT ? 4 : 2;
+    static uint8_t *out;
+    static int out_cap;
+    if (count * isz > out_cap) {
+        free(out);
+        out_cap = count * isz;
+        out = malloc(out_cap);
+        if (!out) {
+            out_cap = 0;
+            return 0;
+        }
+    }
+    int kept = 0;
+    for (int t = 0; t + 2 < count; t += 3) {
+        int z = -2; // los 3 vértices en la misma zona: barras largas del menú de pausa (sensibilidad) no
+        for (int k = 0; k < 3; k++) {
+            uint32_t vi = isz == 4 ? ((const uint32_t *)ib)[t + k] : ((const uint16_t *)ib)[t + k];
+            const float *f = (const float *)(vbase + (size_t)vi * st);
+            float v[3] = {f[0], f[1], sz > 2 ? f[2] : 0};
+            int zk = hud_zone(hud_prog[h].m, v);
+            z = z == -2 || z == zk ? zk : -1;
+        }
+        if (z < 0)
+            memcpy(out + kept++ * 3 * isz, ib + t * isz, 3 * isz);
+    }
+    if (kept * 3 == count)
+        return 0;
+    static int logged;
+    if (!logged++)
+        l_info("HUD: controles en pantalla ocultos (%d de %d triángulos en zonas)", count / 3 - kept, count / 3);
+    if (kept) {
+        if (bound_element_buffer)
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+        PROF(P_DRAW, glDrawElements(mode, kept * 3, type, out));
+        if (bound_element_buffer)
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, bound_element_buffer);
+    }
+    return 1;
+#else
+    return 0;
+#endif
 }
 
 static void g_glDrawArrays(GLenum mode, GLint first, GLsizei count) {
-    trace2_draw("DA", mode, count, 0, (const void *)first);
     trace_draw("DrawArrays", mode, count, first);
     draw_calls++;
     PROF(P_CONV, convert_fixed(first, first + count));
@@ -412,9 +519,10 @@ static void g_glDrawArrays(GLenum mode, GLint first, GLsizei count) {
 }
 
 static void g_glDrawElements(GLenum mode, GLsizei count, GLenum type, const void *idx) {
-    trace2_draw("DE", mode, count, type, idx);
     trace_draw("DrawElements", mode, count, 0);
     draw_calls++;
+    if (gles_api == 2 && hud_draw(mode, count, type, idx))
+        return;
     extern int palette_active(void);
     int need_fixed = palette_active();
     for (int k = 0; k < A_N; k++)
@@ -1184,12 +1292,7 @@ void gles_present(void) {
     dump_frame(trace_frame && lit_state > 1);
     if (trace_frame)
         l_info("TRACE fin del frame (%d draws)", trace_n), trace_frame = 0;
-    static int t2_at, t2_n;
-    if (trace2)
-        l_info("T2 fin del frame %d", presents), trace2 = 0;
-    else if (frame_draws >= 55 && t2_n < 4 && (!t2_n || presents >= t2_at + 900))
-        t2_at = presents, t2_n++, trace2 = 1, l_info("T2 inicio del frame %d (%d draws el anterior)", presents + 1, frame_draws);
-    frame_draws = 0;
+    last_race = race_frame, race_frame = 0;
     if (lit_state == 1 || ((lit_state == 2 || lit_state == 3) && presents == lit_at + 150)) { // traza el siguiente
         lit_at = presents, lit_state++, lit_full = 0;
         trace_frame = 1, trace_n = 0, trace_max = 120, l_info("TRACE inicio del frame 3D %d", presents + 1);
@@ -1464,14 +1567,13 @@ static void g_glShaderSource(GLuint s, GLsizei n, const GLchar *const *str, cons
             return;
         }
     }
-    static int logged;
-    if (logged++ < 200 && n > 0) { // diag: identifica el .dat de cada shader (ver T2 / PROG)
-        int l = len && len[n - 1] >= 0 ? len[n - 1] : (int)strlen(str[n - 1]);
-        const char *m = memmem(str[n - 1], l, "void main", 9);
-        char snip[81] = "";
-        for (int i = 0; m && i < 80 && m + 9 + i < str[n - 1] + l; i++)
-            snip[i] = (unsigned char)m[9 + i] < ' ' ? ' ' : m[9 + i];
-        l_info("SH %u n%d len %d |%s", s, n, l, snip);
+    if (s < sizeof(sh_kind)) {
+        sh_kind[s] = 0;
+        for (int i = 0; i < n; i++) {
+            int l = len && len[i] >= 0 ? len[i] : (int)strlen(str[i]);
+            if (memmem(str[i], l, "sampler2D FrameBuffer", 21)) // file000345: carrocería en carrera
+                sh_kind[s] = K_RACE;
+        }
     }
     glShaderSource(s, n, str, len);
 }
@@ -1509,7 +1611,12 @@ static void g_glLinkProgram(GLuint p) {
     GLsizei c = 0;
     GLuint sh[2] = {0};
     glGetAttachedShaders(p, 2, &c, sh);
-    l_info("PROG %u: %u + %u", p, sh[0], sh[1]);
+    if (p >= sizeof(prog_kind))
+        return;
+    prog_kind[p] = 0;
+    for (int i = 0; i < c; i++)
+        if (sh[i] < sizeof(sh_kind) && sh_kind[sh[i]])
+            prog_kind[p] = sh_kind[sh[i]];
 }
 
 // ---------------------------------------------------------------- tabla
@@ -1546,11 +1653,11 @@ const import_entry gles_imports[] = {
     F(glCompressedTexSubImage2D, g_glCompressedTexSubImage2D), F(glMapBufferOES, glMapBuffer), F(glUnmapBufferOES, glUnmapBuffer),
     D(glCreateShader), F(glShaderSource, g_glShaderSource), F(glCompileShader, g_glCompileShader), D(glDeleteShader), D(glGetShaderiv),
     D(glGetShaderInfoLog), D(glGetShaderSource), D(glCreateProgram), D(glAttachShader), D(glBindAttribLocation),
-    F(glLinkProgram, g_glLinkProgram), D(glUseProgram), D(glGetProgramiv), D(glGetProgramInfoLog), F(glValidateProgram, g_glNoop),
-    D(glGetAttribLocation), D(glGetUniformLocation), D(glGetActiveAttrib), D(glGetActiveUniform),
+    F(glLinkProgram, g_glLinkProgram), F(glUseProgram, g_glUseProgram), D(glGetProgramiv), D(glGetProgramInfoLog), F(glValidateProgram, g_glNoop),
+    D(glGetAttribLocation), F(glGetUniformLocation, g_glGetUniformLocation), D(glGetActiveAttrib), D(glGetActiveUniform),
     D(glUniform1f), D(glUniform2f), D(glUniform3f), D(glUniform4f), D(glUniform1i), D(glUniform2i), D(glUniform3i), D(glUniform4i),
     D(glUniform1fv), D(glUniform2fv), D(glUniform3fv), D(glUniform4fv), D(glUniform1iv), D(glUniform2iv), D(glUniform3iv),
-    D(glUniform4iv), D(glUniformMatrix2fv), D(glUniformMatrix3fv), D(glUniformMatrix4fv), D(glVertexAttrib1f),
+    D(glUniform4iv), D(glUniformMatrix2fv), D(glUniformMatrix3fv), F(glUniformMatrix4fv, g_glUniformMatrix4fv), D(glVertexAttrib1f),
     D(glVertexAttrib2f), D(glVertexAttrib3f), D(glVertexAttrib4fv), D(glStencilOpSeparate), D(glStencilFuncSeparate),
     D(glStencilMaskSeparate), D(glBlendEquationSeparate), D(glBlendFuncSeparate), D(glIsProgram),
     D(glGetVertexAttribfv), D(glGetVertexAttribiv),

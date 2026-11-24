@@ -209,3 +209,30 @@ Cambios de fondo:
   attr_map[1] y leía las UV como parte del stream 0 => UV basura. Fix en `vendor/vitaGL/source/custom_shaders.c`
   (`vgl_attribs_interleaved`): todos los atributos activos dentro de la fila del stream 0 y con su stride.
   Diagnóstico T2/SH/PROG en el log (temporal).
+
+## Log 015 — carrocería OK. Controles físicos, HUD oculto y extras (Zenonia 2 / Inotia 4 / Ferrari)
+- Quitado el diagnóstico T2/SH/PROG.
+- HUD oculto (options.txt `hud=1`, fila "On-screen buttons" del menú SELECT+START): en frames de carrera (se usó el
+  programa con `file000345`) no se dibujan los triángulos del shader 2D `file000441` que caen enteros en
+  `PORT_HUD_ZONES` (freno, gas, nitro, pausa; coordenadas de controls.txt). La posición sale de la
+  WorldViewProjectionMatrix capturada en `glUniformMatrix4fv`. Los toques siguen funcionando. Falta probar en consola.
+- input.c: REAR_TL/TR/BL/BR (cuadrantes del táctil trasero) como botones; START/SELECT tocan al soltar y no
+  si fueron parte de SELECT+START.
+- No se agregó: L+R para el HUD (L/R son freno/gas: chocaría al derrapar), velocidad de juego (lógica atada al
+  frame, en carreras cambia la física), traducción (es de Inotia 4).
+
+## Log 016 — HUD oculto en reposo, pero los botones pulsados aparecen; control D sin mando; FPS ~30
+- FPS: con los speedhacks de vitaGL (log 013) la carrera iba a 40-48 fps; sin ellos (015/016), a 28-32, con
+  `draw` subiendo de ~4 a ~11 ms. No eran la causa de la carrocería (era la detección de atributos empaquetados),
+  así que volvieron `SAMPLERS_SPEEDHACK=1 DRAW_SPEEDHACK=2`. Picos de 0,5-8 s = menú de opciones abierto.
+- Logs 017-019: con `DRAW_SPEEDHACK=2` (SAFER_DRAW_SPEEDHACK) los autos vuelven a verse rotos en las 3 carreras, también
+  con el perfil 3GS (019). Ese modo hace que la GPU lea en el lugar los arrays de cliente de más de 32 KB (la carrocería),
+  y el juego los reescribe antes de que la GPU dibuje. Se quita; queda solo `SAMPLERS_SPEEDHACK=1` (solo salta un chequeo
+  de NULL en las unidades de textura). La carrera vuelve a ~30 fps; MSAA 2x (017-019) también cuesta GPU.
+- HUD: el sprite pulsado usa otro shader y es más grande que el suelto. Ahora se filtra cualquier programa con
+  WorldViewProjectionMatrix ortográfica (m[3]=m[7]=m[11]=0) cuyo triángulo tenga el centro en una zona.
+- Control D (tocar mitad izquierda/derecha): en carrera, stick/cruceta -> dedo virtual en (0,2|0,8 , 0,45).
+  Opción "Steering" (`steer=`): inclinación + toque / solo inclinación / solo toque.
+- Opción "iPhone profile" (`device=`, hw.machine de sysctl/uname; al reiniciar): 2G, 3G, iPod 2G, 3GS, iPod 3G, 4.
+- Log 020: el filtro por centro borraba la barra de "Sensibilidad" del menú de pausa (cruza gas y nitro). Vuelve a
+  exigir los 3 vértices en la misma zona, agrandada un 25% por lado para que entre el sprite pulsado.

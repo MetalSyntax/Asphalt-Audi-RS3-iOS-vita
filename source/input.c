@@ -25,6 +25,12 @@
 static struct {
     int id, down;
 } fingers[2];
+// Cuadrantes del táctil trasero como botones (como Zenonia 2 / Inotia 4), en bits que SceCtrl no usa.
+#define REAR_TL 0x10000000u
+#define REAR_TR 0x20000000u
+#define REAR_BL 0x40000000u
+#define REAR_BR 0x80000000u
+static uint32_t tap_up; // binds de START/SELECT que tocaron al soltar: se levantan en el siguiente poll
 static uint32_t prev_buttons;
 static float stick_x, stick_y;
 
@@ -36,6 +42,8 @@ static const struct {
     {"TRIANGLE", SCE_CTRL_TRIANGLE}, {"LTRIGGER", SCE_CTRL_LTRIGGER}, {"RTRIGGER", SCE_CTRL_RTRIGGER},
     {"START", SCE_CTRL_START},       {"SELECT", SCE_CTRL_SELECT}, {"UP", SCE_CTRL_UP},
     {"DOWN", SCE_CTRL_DOWN},         {"LEFT", SCE_CTRL_LEFT},     {"RIGHT", SCE_CTRL_RIGHT},
+    {"REAR_TL", REAR_TL},            {"REAR_TR", REAR_TR},        {"REAR_BL", REAR_BL},
+    {"REAR_BR", REAR_BR},
 };
 #define MAX_BIND 8
 #define NNAMES (int)(sizeof(names) / sizeof(names[0]))
@@ -89,7 +97,8 @@ void input_save_controls(void) {
     if (!f)
         return;
     fprintf(f, "# Botón x y acción (coordenadas de lo que se ve, 480x320 apaisado). Se remapea con SELECT+START.\n"
-               "# Botones: CROSS CIRCLE SQUARE TRIANGLE LTRIGGER RTRIGGER START SELECT UP DOWN LEFT RIGHT\n");
+               "# Botones: CROSS CIRCLE SQUARE TRIANGLE LTRIGGER RTRIGGER START SELECT UP DOWN LEFT RIGHT\n"
+               "# REAR_TL REAR_TR REAR_BL REAR_BR = cuadrantes del táctil trasero. START y SELECT tocan al soltar.\n");
     if (pad_r > 0)
         fprintf(f, "STICK %g %g %g\n", pad_x, pad_y, pad_r);
     for (int i = 0; i < nbinds; i++)
@@ -99,13 +108,15 @@ void input_save_controls(void) {
 
 void input_init(void) {
     sceTouchSetSamplingState(SCE_TOUCH_PORT_FRONT, SCE_TOUCH_SAMPLING_STATE_START);
+    sceTouchSetSamplingState(SCE_TOUCH_PORT_BACK, SCE_TOUCH_SAMPLING_STATE_START);
     sceCtrlSetSamplingMode(SCE_CTRL_MODE_ANALOG);
     load_controls();
 }
 
-void input_stick(float *x, float *y) {
-    *x = stick_x;
-    *y = stick_y;
+void input_stick(float *x, float *y) { // -> acelerómetro (uikit.c)
+    int tilt = opt_steer != STEER_TOUCH;
+    *x = tilt ? stick_x : 0;
+    *y = tilt ? stick_y : 0;
 }
 
 // Normalizado [0,1] en lo que se ve -> coordenadas de la vista (ver uv_rot en gles.c).
@@ -182,6 +193,16 @@ void input_poll(void) {
         stick_x = 0;
     if (stick_y > -0.12f && stick_y < 0.12f)
         stick_y = 0;
+    SceTouchData rear;
+    if (sceTouchPeek(SCE_TOUCH_PORT_BACK, &rear, 1) < 1)
+        rear.reportNum = 0;
+    for (int i = 0; i < (int)rear.reportNum; i++) // panel trasero ~1920x(108..889)
+        pad.buttons |= rear.report[i].x < 960 ? (rear.report[i].y < 498 ? REAR_TL : REAR_BL)
+                                              : (rear.report[i].y < 498 ? REAR_TR : REAR_BR);
+    uint32_t both = SCE_CTRL_SELECT | SCE_CTRL_START;
+    static int combo; // SELECT+START apretados juntos desde el último soltar: no tocan nada
+    if ((pad.buttons & both) == both)
+        combo = 1;
     uint32_t b = pad.buttons, changed = b ^ prev_buttons, bound = 0;
     for (int i = 0; i < nbinds; i++)
         bound |= names[binds[i].name].mask;
@@ -190,13 +211,25 @@ void input_poll(void) {
         stick_x = !!(b & SCE_CTRL_RIGHT) - !!(b & SCE_CTRL_LEFT);
     for (int i = 0; i < nbinds; i++) {
         uint32_t mask = names[binds[i].name].mask;
-        if (!(changed & mask))
-            continue;
         float lw, lh, vx, vy;
         logical_size(&lw, &lh);
         to_view(binds[i].x / lw, binds[i].y / lh, &vx, &vy);
+        if (tap_up & (1u << i)) {
+            tap_up &= ~(1u << i);
+            ui_touch_event(BTN_FINGER0 + i, 3, vx, vy);
+            continue;
+        }
+        if (!(changed & mask))
+            continue;
+        if (mask & both) { // al soltar, y solo si no fue parte de SELECT+START
+            if (!(b & mask) && !combo)
+                ui_touch_event(BTN_FINGER0 + i, 0, vx, vy), tap_up |= 1u << i;
+            continue;
+        }
         ui_touch_event(BTN_FINGER0 + i, (b & mask) ? 0 : 3, vx, vy);
     }
+    if (!(b & both))
+        combo = 0;
     if (pad_r > 0) {
         float px = stick_x, py = stick_y;
         int dx = !!(b & SCE_CTRL_RIGHT) - !!(b & SCE_CTRL_LEFT), dy = !!(b & SCE_CTRL_DOWN) - !!(b & SCE_CTRL_UP);
@@ -213,8 +246,18 @@ void input_poll(void) {
             pad_down = on;
         }
     }
+    // Control D del juego (tocar la mitad izquierda/derecha para girar): stick/cruceta -> dedo virtual, en carrera
+    static int steer; // -1 izquierda, 1 derecha, 0 suelto
+    if (pad_r <= 0 && (steer || opt_steer != STEER_TILT)) {
+        int want = opt_steer != STEER_TILT && gles_in_race() ? (stick_x < -0.35f ? -1 : stick_x > 0.35f) : 0;
+        if (want != steer) {
+            float vx, vy;
+            to_view((steer ? steer : want) < 0 ? 0.2f : 0.8f, 0.45f, &vx, &vy);
+            ui_touch_event(PAD_FINGER, steer ? 3 : 0, vx, vy);
+            steer = steer ? 0 : want; // cambiar de lado: soltar ahora, apoyar en el siguiente poll
+        }
+    }
     // SELECT+START: menú de opciones de video (options.c; ahí también va la rotación)
-    uint32_t both = SCE_CTRL_SELECT | SCE_CTRL_START;
     if ((b & both) == both && (prev_buttons & both) != both)
         options_open();
     prev_buttons = b;

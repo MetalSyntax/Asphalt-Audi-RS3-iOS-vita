@@ -5,6 +5,9 @@
 //     msaa=0            (0 | 2 | 4; se aplica al reiniciar)
 //     rotation=1        (0 sin girar, 1 landscape-right, 2 landscape-left)
 //     stretch=0         (1 = pantalla completa)
+//     hud=1             (1 = controles táctiles del juego ocultos en carrera; siguen funcionando)
+//     steer=0           (0 inclinación + tocar lados, 1 solo inclinación, 2 solo tocar lados: stick/cruceta)
+//     device=iPhone2,1  (hw.machine que ve el juego: elige calidad de texturas/efectos; al reiniciar)
 #include <psp2/ctrl.h>
 #include <stdio.h>
 #include <string.h>
@@ -26,7 +29,16 @@
 extern const unsigned char font8x8[];
 extern int port_rotation;
 
-int opt_filter = FILTER_SHARP, opt_msaa = 0, opt_msaa_active = 0, opt_stretch = PORT_STRETCH;
+int opt_filter = FILTER_SHARP, opt_msaa = 0, opt_msaa_active = 0, opt_stretch = PORT_STRETCH, opt_hud_hidden = 1;
+int opt_steer = STEER_BOTH;
+static const char *devices[][2] = {{"iPhone1,1", "IPHONE 2G"}, {"iPhone1,2", "IPHONE 3G"}, {"iPod2,1", "IPOD TOUCH 2G"},
+                                   {"iPhone2,1", "IPHONE 3GS"}, {"iPod3,1", "IPOD TOUCH 3G"}};
+// ponytail: sin iPhone 4 (iPhone3,1): el juego cambia a otros shaders de carrocería y se rompe el arreglo; agregarlo
+// cuando haya un log de carrera con ese perfil. Un options.txt con device=iPhone3,1 vuelve a PORT_DEVICE_MACHINE.
+#define NDEV (int)(sizeof(devices) / sizeof(devices[0]))
+static int opt_device = -1, opt_device_active = -1; // -1 = PORT_DEVICE_MACHINE
+const char *options_machine(void) { return opt_device_active < 0 ? PORT_DEVICE_MACHINE : devices[opt_device_active][0]; }
+static const char *steer_labels[] = {"TILT + TOUCH SIDES", "TILT ONLY", "TOUCH SIDES ONLY"};
 static volatile int open_req, active;
 
 static const char *filter_names[] = {"bilinear", "sharp", "pixel"};
@@ -49,22 +61,37 @@ void options_load(void) {
                 port_rotation = v;
             else if (sscanf(line, "stretch=%d", &v) == 1)
                 opt_stretch = !!v;
+            else if (sscanf(line, "hud=%d", &v) == 1)
+                opt_hud_hidden = !!v;
+            else if (sscanf(line, "steer=%d", &v) == 1 && v >= 0 && v <= 2)
+                opt_steer = v;
+            else if (sscanf(line, "device=%15s", s) == 1)
+                for (int i = 0; i < NDEV; i++)
+                    if (!strcmp(s, devices[i][0]))
+                        opt_device = i;
         }
         fclose(f);
     }
     if (opt_filter == FILTER_PIXEL && !PORT_2D)
         opt_filter = FILTER_SHARP;
     opt_msaa_active = opt_msaa;
-    l_info("options.txt: filtro %s, MSAA %dx, rotación %d, pantalla completa %d", filter_names[opt_filter], opt_msaa,
-           port_rotation, opt_stretch);
+    if (opt_device < 0)
+        for (int i = 0; i < NDEV; i++)
+            if (!strcmp(PORT_DEVICE_MACHINE, devices[i][0]))
+                opt_device = i;
+    opt_device_active = opt_device;
+    l_info("options.txt: filtro %s, MSAA %dx, rotación %d, pantalla completa %d, dirección %d, equipo %s",
+           filter_names[opt_filter], opt_msaa, port_rotation, opt_stretch, opt_steer, options_machine());
 }
 
 static void options_save(void) {
     FILE *f = fopen(OPTIONS_PATH, "w");
     if (!f)
         return;
-    fprintf(f, "filter=%s\nmsaa=%d\nrotation=%d\nstretch=%d\n", filter_names[opt_filter], opt_msaa, port_rotation,
-            opt_stretch);
+    fprintf(f, "filter=%s\nmsaa=%d\nrotation=%d\nstretch=%d\nhud=%d\nsteer=%d\n", filter_names[opt_filter], opt_msaa,
+            port_rotation, opt_stretch, opt_hud_hidden, opt_steer);
+    if (opt_device >= 0)
+        fprintf(f, "device=%s\n", devices[opt_device][0]);
     fclose(f);
 }
 
@@ -78,7 +105,7 @@ int options_active(void) { return active; }
 
 // ---------------------------------------------------------------- panel
 
-enum { ROW_SIZE, ROW_FILTER, ROW_MSAA, ROW_ROT, ROWS_VIDEO };
+enum { ROW_SIZE, ROW_FILTER, ROW_MSAA, ROW_ROT, ROW_HUD, ROW_STEER, ROW_DEVICE, ROWS_VIDEO };
 #define ROWS (ROWS_VIDEO + input_bind_count()) // + una fila por acción de controls.txt
 #define PW 480
 #define PH 272 // x2 = 544: pantalla completa con 8 acciones
@@ -107,16 +134,17 @@ static void text(int x, int y, uint32_t c, const char *s) {
 }
 
 static void render(void) {
-    static const char *labels[ROWS_VIDEO] = {"Screen size", "Screen filter", "Anti-aliasing (MSAA)", "Rotation"};
+    static const char *labels[ROWS_VIDEO] = {"Screen size", "Screen filter", "Anti-aliasing (MSAA)", "Rotation",
+                                              "On-screen buttons", "Steering (stick/d-pad)", "iPhone profile"};
     char val[48];
     fill(0, PH, C_BG);
     text(16, 8, C_HEAD, "VIDEO OPTIONS");
     if (input_bind_count())
-        text(16, 28 + ROWS_VIDEO * 16 + 4, C_HEAD, "CONTROLS (button -> on-screen action)");
+        text(16, 28 + ROWS_VIDEO * 14 + 4, C_HEAD, "CONTROLS (button -> on-screen action)");
     for (int r = 0; r < ROWS; r++) {
-        int y = 28 + r * 16 + (r >= ROWS_VIDEO ? 20 : 0);
+        int y = 28 + r * 14 + (r >= ROWS_VIDEO ? 20 : 0); // 14: caben 7 opciones + 8 acciones
         if (r == cursor)
-            fill(y - 4, 16, C_SEL);
+            fill(y - 3, 14, C_SEL);
         text(16, y, C_TEXT, r < ROWS_VIDEO ? labels[r] : input_bind_label(r - ROWS_VIDEO));
         if (r >= ROWS_VIDEO)
             strcpy(val, input_bind_button(r - ROWS_VIDEO));
@@ -127,13 +155,21 @@ static void render(void) {
         else if (r == ROW_MSAA)
             snprintf(val, sizeof(val), "%s%s", opt_msaa == 4 ? "4X" : opt_msaa == 2 ? "2X" : "OFF",
                      opt_msaa != opt_msaa_active ? " (RESTART)" : "");
+        else if (r == ROW_HUD)
+            strcpy(val, opt_hud_hidden ? "HIDDEN (STILL WORK)" : "SHOWN");
+        else if (r == ROW_STEER)
+            strcpy(val, steer_labels[opt_steer]);
+        else if (r == ROW_DEVICE)
+            snprintf(val, sizeof(val), "%s%s", opt_device < 0 ? PORT_DEVICE_MACHINE : devices[opt_device][1],
+                     opt_device != opt_device_active ? " (RESTART)" : "");
         else
             strcpy(val, rot_labels[port_rotation]);
         text(208, y, C_TEXT, val);
     }
     text(16, PH - 28, C_DIM, "LEFT/RIGHT or X change   O save & close");
-    text(16, PH - 16, C_DIM, opt_msaa != opt_msaa_active ? "MSAA applies after restarting the game"
-                                                    : "MSAA costs GPU time on heavy 3D scenes");
+    text(16, PH - 16, C_DIM, opt_msaa != opt_msaa_active || opt_device != opt_device_active
+                                 ? "MSAA/profile apply after restarting the game"
+                                 : "Older iPhone profile = lighter graphics, more FPS");
 }
 
 static void change(int row, int d) {
@@ -148,7 +184,13 @@ static void change(int row, int d) {
         static const int v[] = {0, 2, 4};
         int i = opt_msaa / 2; // 0,2,4 -> 0,1,2
         opt_msaa = v[(i + d + 3) % 3];
-    } else
+    } else if (row == ROW_HUD)
+        opt_hud_hidden = !opt_hud_hidden;
+    else if (row == ROW_STEER)
+        opt_steer = (opt_steer + d + 3) % 3;
+    else if (row == ROW_DEVICE && opt_device >= 0)
+        opt_device = (opt_device + d + NDEV) % NDEV;
+    else
         port_rotation = (port_rotation + d + 3) % 3;
 }
 
