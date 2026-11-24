@@ -189,3 +189,23 @@ Cambios de fondo:
   la captura) + remapeo en el menú SELECT+START (sección CONTROLS, izq/der cambia el botón, se guarda en
   controls.txt con la etiqueta de la acción). Cruceta izq/der = inclinación digital si no está asignada.
   MAX_BIND 8 (uikit MAX_TOUCH 11). Probado en hosttest: los botones tocan EAGLView y el menú se ve bien.
+
+## Log 011 — en carrera; autos oscuros, sin reflejos, carrocería transparente en el choque
+- GLES2 (initWithAPI:2): los TRACE de FFP del log no muestran el estado real del shader.
+- El hint COLOR del log 008 recorta las luces a [0,1] con poca precisión; además el FS `file000157` escribe sobre
+  sus varyings y calcula `vCoord1` en un varying que el VS no emite.
+- Fix: `g_glShaderSource` reemplaza el par `file000467`/`file000157` (firma por texto) por una versión con la misma
+  matemática: luces y DiffuseColor como uniforms del FS (vitaGL los encuentra por nombre), 6 varyings, sin escribir
+  varyings. Se quitaron los `vglAddSemanticBindingHint`; caché nueva `ux0:data/shader_cache/PSVAUDIRS-sem2`
+  (la `-sem1` se puede borrar). Validado con glslangValidator; falta confirmar en consola.
+
+## Logs 012-013 — media carrocería invisible / carrocería rayada al chocar
+- El reemplazo de 157/467 no aplica: en carrera la carrocería es el programa `file000044` VS + `file000025` FS
+  ("minReflection"), un solo draw de 5874 índices (GL_UNSIGNED_INT) con arrays en RAM (sin VBO, stride 32).
+- El doble draw con glFrontFace CW/CCW del showroom es el reflejo en el piso, no la mitad espejada.
+- Log 014 (sin SAMPLERS/DRAW_SPEEDHACK, igual) descarta la lectura tardía de vértices; se quitó la copia `draw_copied`.
+- Causa: en carrera la carrocería es `file000345` (programa 32) con posición+normal intercaladas (stride 24) y UV en
+  otro array (stride 32, ~15 MB más allá). vitaGL sin STRICT_DRAW_COMPLIANCE decidía "empaquetado" mirando solo
+  attr_map[1] y leía las UV como parte del stream 0 => UV basura. Fix en `vendor/vitaGL/source/custom_shaders.c`
+  (`vgl_attribs_interleaved`): todos los atributos activos dentro de la fila del stream 0 y con su stride.
+  Diagnóstico T2/SH/PROG en el log (temporal).

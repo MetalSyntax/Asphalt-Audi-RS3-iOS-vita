@@ -54,8 +54,13 @@ static const char *dpath(const char *in, char *out, size_t outlen) {
         snprintf(out, outlen, "%s", BUNDLE_PATH);
         return out;
     }
-    if (strchr(in, ':')) {
-        snprintf(out, outlen, "%s", in);
+    const char *colon = strchr(in, ':');
+    if (colon) {
+        // getcwd() en la Vita devuelve "ux0:/...": normalizar a "ux0:..." para que coincida con BUNDLE_PATH.
+        if (colon[1] == '/')
+            snprintf(out, outlen, "%.*s:%s", (int)(colon - in), in, colon + 2);
+        else
+            snprintf(out, outlen, "%s", in);
         return out;
     }
     if (in[0] != '/') { // relativa: al cwd (chdir del juego o el bundle)
@@ -109,6 +114,18 @@ static char io_name[96];
 static uint64_t io_t0, io_close;
 static unsigned io_reads, io_seeks, io_logs;
 #define IO_SLOW_US 150000
+#define MISS_CAP 1024
+static pthread_mutex_t miss_lock = PTHREAD_MUTEX_INITIALIZER;
+static uint32_t miss_cache[MISS_CAP];
+static unsigned nmiss;
+static char bundle_cwd[256];
+
+static uint32_t fnv1a_add(uint32_t h, const char *s) {
+    for (; *s; s++)
+        h = (h ^ (unsigned char)*s) * 16777619u;
+    return h;
+}
+
 static FILE *d_fopen(const char *path, const char *mode) {
     PATH(path);
     size_t n = strlen(P);
@@ -131,28 +148,44 @@ static FILE *d_fopen(const char *path, const char *mode) {
         probes[wav]++, l_info("carga: %s sceIoOpen %u ms (0x%X) close %u ms, fopen %u ms", P, (unsigned)((b - a) / 1000), fd,
                          (unsigned)((c - b) / 1000), (unsigned)((d - c) / 1000));
     }
-    // El bundle es de solo lectura: un archivo que no estaba no aparece después. Los fallos repetidos (glsl.config
-    // se pide antes de cada shader) se contestan desde RAM sin volver a recorrer el directorio en ux0:.
-    static uint32_t miss[256];
-    static unsigned nmiss;
+    // El bundle es de solo lectura: un archivo que no estaba no aparece después. Los fallos repetidos (glsl.config,
+    // *_Car_Body_Reflection_ForShader.png, .wav relativos en game_app/data/) se contestan desde RAM sin volver a ux0:.
     uint32_t h = 0;
-    int ro = mode[0] == 'r' && !strchr(mode, '+') && !strncmp(P, BUNDLE_PATH, sizeof(BUNDLE_PATH) - 1);
-    if (ro) {
-        h = 2166136261u;
-        for (const char *c = P; *c; c++)
-            h = (h ^ (unsigned char)*c) * 16777619u; // FNV-1a
-        for (unsigned i = 0; i < nmiss && i < 256; i++)
-            if (miss[i] == h) {
-                errno = ENOENT;
-                return NULL;
+    int ro = 0;
+    if (mode[0] == 'r' && !strchr(mode, '+')) {
+        int in_bundle_abs = !strncmp(P, BUNDLE_PATH, sizeof(BUNDLE_PATH) - 1);
+        int is_rel = !strchr(P, ':') && P[0] != '/';
+        pthread_mutex_lock(&miss_lock);
+        if (in_bundle_abs || (is_rel && bundle_cwd[0])) {
+            ro = 1;
+            h = 2166136261u;
+            if (is_rel) {
+                h = fnv1a_add(h, bundle_cwd);
+                h = fnv1a_add(h, "/");
             }
+            h = fnv1a_add(h, P);
+            unsigned lim = nmiss < MISS_CAP ? nmiss : MISS_CAP;
+            for (unsigned i = 0; i < lim; i++)
+                if (miss_cache[i] == h) {
+                    pthread_mutex_unlock(&miss_lock);
+                    errno = ENOENT;
+                    return NULL;
+                }
+        }
+        pthread_mutex_unlock(&miss_lock);
     }
     uint64_t t = sceKernelGetProcessTimeWide();
     FILE *f = fopen(P, mode);
     if (!f) {
+        int err = errno; // guardar antes de l_info() para no pisar errno
         l_info("fopen(%s <- %s, %s) falló", P, path, mode); // archivo que el juego espera y no está
-        if (ro && errno == ENOENT)
-            miss[nmiss++ % 256] = h;
+        if (ro && err == ENOENT) {
+            pthread_mutex_lock(&miss_lock);
+            miss_cache[nmiss++ % MISS_CAP] = h;
+            pthread_mutex_unlock(&miss_lock);
+        }
+        ui_loading_tick(); // ráfagas de fopen fallidos durante la carga no deben disparar el watchdog
+        errno = err;
     }
     l_debug("fopen(%s, %s) -> %p", P, mode, f);
     if (f) {
@@ -219,6 +252,14 @@ static int d_rename(const char *a, const char *b) {
 static int d_chdir(const char *path) {
     PATH(path);
     int r = chdir(P);
+    if (!r) {
+        pthread_mutex_lock(&miss_lock);
+        if (!strncmp(P, BUNDLE_PATH, sizeof(BUNDLE_PATH) - 1))
+            snprintf(bundle_cwd, sizeof(bundle_cwd), "%s", P);
+        else
+            bundle_cwd[0] = 0;
+        pthread_mutex_unlock(&miss_lock);
+    }
     l_info("chdir(%s) -> %d", P, r);
     return r;
 }

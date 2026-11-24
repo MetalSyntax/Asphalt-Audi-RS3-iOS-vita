@@ -686,6 +686,23 @@ void reset_custom_shaders(void) {
 	}
 }
 
+// Port: el original solo miraba attr_map[1]. Asphalt Audi RS3 (log 014) dibuja la carrocería con posición+normal
+// intercaladas (stride 24) y las UV en otro array (stride 32, ~15 MB más allá): vitaGL las leía como un único stream
+// (offset truncado y stride ajeno) => UV basura, carrocería transparente/media carrocería. Todos los atributos
+// activos deben caber en la primera fila del stream 0 y compartir su stride.
+static inline GLboolean vgl_attribs_interleaved(program *p, SceGxmVertexStream *streams) {
+	uint32_t base = cur_vao->vertex_attrib_offsets[p->attr_map[0]];
+	for (int i = 1; i < p->attr_num; i++) {
+		uint8_t attr_idx = p->attr_map[i];
+		if (!(cur_vao->vertex_attrib_state & (1 << attr_idx)))
+			continue;
+		uint32_t o = cur_vao->vertex_attrib_offsets[attr_idx];
+		if (streams[i].stride != streams[0].stride || o <= base || o >= base + streams[0].stride)
+			return GL_FALSE;
+	}
+	return GL_TRUE;
+}
+
 void _glMultiDrawArrays_CustomShadersIMPL(SceGxmPrimitiveType gxm_p, uint16_t *idx_ptr, const GLint *first, const GLsizei *count, GLint lowest, GLsizei highest, GLsizei drawcount) {
 #ifdef HAVE_PROFILING
 	uint32_t draw_start = sceKernelGetProcessTimeLow();
@@ -816,7 +833,7 @@ void _glMultiDrawArrays_CustomShadersIMPL(SceGxmPrimitiveType gxm_p, uint16_t *i
 			}
 		}
 #ifndef STRICT_DRAW_COMPLIANCE
-		if (is_packed && (!(cur_vao->vertex_attrib_offsets[p->attr_map[0]] + streams[0].stride > cur_vao->vertex_attrib_offsets[p->attr_map[1]] && cur_vao->vertex_attrib_offsets[p->attr_map[1]] > cur_vao->vertex_attrib_offsets[p->attr_map[0]])))
+		if (is_packed && !vgl_attribs_interleaved(p, streams))
 			is_packed = GL_FALSE;
 	}
 #endif
@@ -1036,7 +1053,7 @@ GLboolean _glDrawArrays_CustomShadersIMPL(GLint first, GLsizei count, GLboolean 
 			}
 		}
 #ifndef STRICT_DRAW_COMPLIANCE
-		if (is_packed && (!(cur_vao->vertex_attrib_offsets[p->attr_map[0]] + streams[0].stride > cur_vao->vertex_attrib_offsets[p->attr_map[1]] && cur_vao->vertex_attrib_offsets[p->attr_map[1]] > cur_vao->vertex_attrib_offsets[p->attr_map[0]])))
+		if (is_packed && !vgl_attribs_interleaved(p, streams))
 			is_packed = GL_FALSE;
 	}
 #endif
@@ -1287,7 +1304,7 @@ GLboolean _glDrawElements_CustomShadersIMPL(uint16_t *idx_buf, GLsizei count, ui
 			}
 		}
 #ifndef STRICT_DRAW_COMPLIANCE
-		if (is_packed && (!(cur_vao->vertex_attrib_offsets[p->attr_map[0]] + streams[0].stride > cur_vao->vertex_attrib_offsets[p->attr_map[1]] && cur_vao->vertex_attrib_offsets[p->attr_map[1]] > cur_vao->vertex_attrib_offsets[p->attr_map[0]])))
+		if (is_packed && !vgl_attribs_interleaved(p, streams))
 			is_packed = GL_FALSE;
 	} else if (!target_vbo)
 		is_full_vbo = GL_FALSE;

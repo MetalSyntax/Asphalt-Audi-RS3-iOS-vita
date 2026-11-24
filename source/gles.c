@@ -362,7 +362,45 @@ static void trace_draw(const char *fn, GLenum mode, int count, int first) {
            pm[12], mv[0], mv[5], mv[12], mv[13], err0);
 }
 
+// ponytail: diagnóstico GLES2 (log 012: media carrocería invisible). Un frame de carrera cada 900 presentaciones
+// (4 veces): estado de cada draw. Quitar al resolver los autos.
+static int trace2, frame_draws;
+static void trace2_draw(const char *fn, GLenum mode, int count, GLenum type, const void *idx) {
+    frame_draws++;
+    if (!trace2 || gles_api != 2)
+        return;
+    GLint prog = 0, tex = 0, ebo = 0, bs = 0, bd = 0, ff = 0, cm = 0, df = 0, at = 0;
+    GLboolean dm = 0;
+    glGetIntegerv(GL_CURRENT_PROGRAM, &prog);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &tex);
+    glGetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &ebo);
+    glGetIntegerv(GL_BLEND_SRC_RGB, &bs);
+    glGetIntegerv(GL_BLEND_DST_RGB, &bd);
+    glGetIntegerv(GL_FRONT_FACE, &ff);
+    glGetIntegerv(GL_CULL_FACE_MODE, &cm);
+    glGetIntegerv(GL_DEPTH_FUNC, &df);
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &at);
+    glGetBooleanv(GL_DEPTH_WRITEMASK, &dm);
+    char a[160] = "", *w = a;
+    for (int i = 0; i < 4; i++) {
+        GLint en = 0, vb = 0, st = 0, sz = 0;
+        void *ptr = NULL;
+        glGetVertexAttribiv(i, GL_VERTEX_ATTRIB_ARRAY_ENABLED, &en);
+        if (!en)
+            continue;
+        glGetVertexAttribiv(i, GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING, &vb);
+        glGetVertexAttribiv(i, GL_VERTEX_ATTRIB_ARRAY_STRIDE, &st);
+        glGetVertexAttribiv(i, GL_VERTEX_ATTRIB_ARRAY_SIZE, &sz);
+        glGetVertexAttribPointerv(i, GL_VERTEX_ATTRIB_ARRAY_POINTER, &ptr);
+        w += snprintf(w, a + sizeof(a) - w, " a%d[%dx st%d vbo%d %p]", i, sz, st, vb, ptr);
+    }
+    l_info("T2 %s m%d n%d t0x%X ebo%d i%p | prog %d tex%d u%d | B%d %X/%X | C%d %X ff %X | D%d %X m%d |%s", fn, mode,
+           count, type, ebo, idx, prog, tex, at - GL_TEXTURE0, glIsEnabled(GL_BLEND), bs, bd, glIsEnabled(GL_CULL_FACE),
+           cm, ff, glIsEnabled(GL_DEPTH_TEST), df, dm, a);
+}
+
 static void g_glDrawArrays(GLenum mode, GLint first, GLsizei count) {
+    trace2_draw("DA", mode, count, 0, (const void *)first);
     trace_draw("DrawArrays", mode, count, first);
     draw_calls++;
     PROF(P_CONV, convert_fixed(first, first + count));
@@ -374,6 +412,7 @@ static void g_glDrawArrays(GLenum mode, GLint first, GLsizei count) {
 }
 
 static void g_glDrawElements(GLenum mode, GLsizei count, GLenum type, const void *idx) {
+    trace2_draw("DE", mode, count, type, idx);
     trace_draw("DrawElements", mode, count, 0);
     draw_calls++;
     extern int palette_active(void);
@@ -988,13 +1027,10 @@ void gles_init(void) {
     options_load(); // MSAA se fija acá (vitaGL lo aplica a la pantalla y a todos los FBO)
     // La caché de vitaGL se indexa por el GLSL original: al cambiar los bindings de varyings (abajo) hay que cambiar
     // de carpeta o reusa los GXP viejos. Subir el sufijo cada vez que cambien los vglAddSemanticBinding*.
-    vglSetShaderCachePath("ux0:data/shader_cache/PSVAUDIRS-sem1");
+    // sem2: sin hints de COLOR (el shader del auto se reescribe en g_glShaderSource); los GXP de sem1 traen otros
+    // bindings y mezclarlos con shaders nuevos desalinea varyings.
+    vglSetShaderCachePath("ux0:data/shader_cache/PSVAUDIRS-sem2");
     vglInitExtended(0, SCR_W, SCR_H, GLES_POOL_MB * 1024 * 1024, options_msaa_mode());
-    // GXM tiene 10 TEXCOORD; el shader del auto (file000467/157) declara 11 varyings y vitaGL metía el 11.º en el
-    // mismo TEXCOORD9 que vCoord0 (carrocería con trozos del atlas y bandas, log 008). Los colores de luz van a
-    // COLOR0/1 (están en [0,1]) y el auto queda en 9 TEXCOORD.
-    vglAddSemanticBindingHint((const GLchar *const *)"vLightAmbient", VGL_TYPE_COLOR);
-    vglAddSemanticBindingHint((const GLchar *const *)"vLightDiffuse", VGL_TYPE_COLOR);
     gles_set_size(fb_w, fb_h);
 }
 
@@ -1148,6 +1184,12 @@ void gles_present(void) {
     dump_frame(trace_frame && lit_state > 1);
     if (trace_frame)
         l_info("TRACE fin del frame (%d draws)", trace_n), trace_frame = 0;
+    static int t2_at, t2_n;
+    if (trace2)
+        l_info("T2 fin del frame %d", presents), trace2 = 0;
+    else if (frame_draws >= 55 && t2_n < 4 && (!t2_n || presents >= t2_at + 900))
+        t2_at = presents, t2_n++, trace2 = 1, l_info("T2 inicio del frame %d (%d draws el anterior)", presents + 1, frame_draws);
+    frame_draws = 0;
     if (lit_state == 1 || ((lit_state == 2 || lit_state == 3) && presents == lit_at + 150)) { // traza el siguiente
         lit_at = presents, lit_state++, lit_full = 0;
         trace_frame = 1, trace_n = 0, trace_max = 120, l_info("TRACE inicio del frame 3D %d", presents + 1);
@@ -1339,6 +1381,101 @@ static void slow_gl(const char *fn, GLuint id, uint64_t t0) {
         l_info("%s %u: %u ms", fn, id, (unsigned)(dt / 1000));
     ui_loading_tick();
 }
+// Shader de carrocería (file000467 VS + file000157 FS), reescrito con la misma matemática. El original no cabe en GXM:
+// 11 varyings (10 TEXCOORD; meter las luces en COLOR las recorta a [0,1] => auto oscuro), el FS escribe sobre sus
+// varyings y calcula vCoord1 en un varying que el VS no emite (reflejo roto). Las 4 constantes por varying pasan a
+// uniforms del FS (vitaGL los encuentra por nombre) y quedan 6 varyings.
+static const char car_vs[] =
+    "attribute highp vec4 Vertex;\n"
+    "attribute highp vec4 Position;\n"
+    "attribute highp vec3 Normal;\n"
+    "attribute mediump vec2 TexCoord0;\n"
+    "varying highp vec3 vNormal;\n"
+    "varying highp vec3 vNormalEnvMap;\n"
+    "varying highp vec3 vPosition;\n"
+    "varying highp vec3 vLightDirection;\n"
+    "varying highp vec3 vViewDirection;\n"
+    "varying mediump vec2 vCoord0;\n"
+    "uniform highp mat4 modelviewmatrix;\n"
+    "uniform highp mat4 matviewi;\n"
+    "uniform highp mat4 WorldViewProjectionMatrix;\n"
+    "uniform highp mat4 worldviewinversetransposed;\n"
+    "uniform highp mat4 matworld;\n"
+    "uniform highp mat4 matworldi;\n"
+    "uniform highp vec4 Light0Position;\n"
+    "void main(void)\n"
+    "{\n"
+    "    highp vec4 position = modelviewmatrix * Vertex;\n"
+    "    highp vec4 eyePos = matviewi[3];\n"
+    "    vNormal = Normal;\n"
+    "    vViewDirection = (matworldi * normalize(eyePos - (matworld * vec4(Position.xyz, 0.0)))).xyz;\n"
+    "    vLightDirection = (matworldi * Light0Position).xyz;\n"
+    "    vCoord0 = TexCoord0;\n"
+    "    vNormalEnvMap = (worldviewinversetransposed * vec4(Normal, 0.0)).xyz;\n"
+    "    vPosition = normalize(position.xyz);\n"
+    "    gl_Position = WorldViewProjectionMatrix * Vertex;\n"
+    "}\n";
+static const char car_fs[] =
+    "varying highp vec3 vNormal;\n"
+    "varying highp vec3 vNormalEnvMap;\n"
+    "varying highp vec3 vPosition;\n"
+    "varying highp vec3 vLightDirection;\n"
+    "varying highp vec3 vViewDirection;\n"
+    "varying mediump vec2 vCoord0;\n"
+    "uniform lowp sampler2D Sampler0;\n"
+    "uniform lowp sampler2D Sampler1;\n"
+    "uniform mediump vec4 Light0Ambientcolor;\n"
+    "uniform mediump vec4 Light0Diffusecolor;\n"
+    "uniform mediump vec4 Light0Specularcolor;\n"
+    "uniform mediump vec4 DiffuseColor;\n"
+    "void main()\n"
+    "{\n"
+    "    highp vec3 L = normalize(vLightDirection);\n"
+    "    highp vec3 N = normalize(vNormal);\n"
+    "    highp vec3 V = normalize(vViewDirection);\n"
+    "    highp vec3 r = reflect(vPosition, vNormalEnvMap);\n"
+    "    highp float m = 2.0 * sqrt(r.x * r.x + r.y * r.y + (r.z + 1.0) * (r.z + 1.0));\n"
+    "    mediump vec2 envCoord = vec2(r.x / m + 0.5, 1.5 - r.y / m);\n"
+    "    mediump float NDotL = dot(N, L);\n"
+    "    mediump vec3 R = normalize(2.0 * N * NDotL - L);\n"
+    "    mediump float RDotV = max(0.0, dot(R, V));\n"
+    "    mediump vec4 baseColor = texture2D(Sampler0, vCoord0);\n"
+    "    mediump float k = clamp(dot(N, V), 0.0, 0.8);\n"
+    "    mediump vec4 color = (Light0Ambientcolor * baseColor + Light0Diffusecolor * max(0.0, NDotL) * baseColor) * k\n"
+    "                       + DiffuseColor * Light0Specularcolor * pow(RDotV, 15.0);\n"
+    "    color.rgb = color.rgb + texture2D(Sampler1, envCoord).rgb * (1.0 - k);\n"
+    "    color.a = baseColor.a + (1.0 - k) * step(0.1, baseColor.a);\n"
+    "    gl_FragColor = color;\n"
+    "}\n";
+#define CAR_VS_SIG "vNormalEnvMap = (worldviewinversetransposed"
+#define CAR_FS_SIG "float reflectanceFactor = clamp(dot(vNormal, vViewDirection)"
+static void g_glShaderSource(GLuint s, GLsizei n, const GLchar *const *str, const GLint *len) {
+    for (int i = 0; i < n; i++) {
+        int l = len && len[i] >= 0 ? len[i] : (int)strlen(str[i]);
+        const char *rep = NULL;
+        // memmem: los trozos no tienen por qué terminar en 0 si viene len
+        if (memmem(str[i], l, CAR_VS_SIG, sizeof(CAR_VS_SIG) - 1))
+            rep = car_vs;
+        else if (memmem(str[i], l, CAR_FS_SIG, sizeof(CAR_FS_SIG) - 1))
+            rep = car_fs;
+        if (rep) {
+            l_info("glShaderSource %u: shader de carrocería reemplazado (%s)", s, rep == car_vs ? "VS" : "FS");
+            glShaderSource(s, 1, &rep, NULL);
+            return;
+        }
+    }
+    static int logged;
+    if (logged++ < 200 && n > 0) { // diag: identifica el .dat de cada shader (ver T2 / PROG)
+        int l = len && len[n - 1] >= 0 ? len[n - 1] : (int)strlen(str[n - 1]);
+        const char *m = memmem(str[n - 1], l, "void main", 9);
+        char snip[81] = "";
+        for (int i = 0; m && i < 80 && m + 9 + i < str[n - 1] + l; i++)
+            snip[i] = (unsigned char)m[9 + i] < ' ' ? ' ' : m[9 + i];
+        l_info("SH %u n%d len %d |%s", s, n, l, snip);
+    }
+    glShaderSource(s, n, str, len);
+}
+
 static void g_glCompileShader(GLuint s) {
     uint64_t t0 = now_us();
     glCompileShader(s);
@@ -1369,6 +1506,10 @@ static void g_glLinkProgram(GLuint p) {
         glGetProgramInfoLog(p, sizeof(log), NULL, log);
         l_error("glLinkProgram %u: %s", p, log);
     }
+    GLsizei c = 0;
+    GLuint sh[2] = {0};
+    glGetAttachedShaders(p, 2, &c, sh);
+    l_info("PROG %u: %u + %u", p, sh[0], sh[1]);
 }
 
 // ---------------------------------------------------------------- tabla
@@ -1403,7 +1544,7 @@ const import_entry gles_imports[] = {
     F(glBlitFramebuffer, g_glNoop), // solo lo usan para resolver MSAA: sin MSAA el FBO multisample ya es la pantalla
     F(glBlendColor, g_glNoop), F(glSampleCoverage, g_glNoop), F(glReleaseShaderCompiler, g_glNoop),
     F(glCompressedTexSubImage2D, g_glCompressedTexSubImage2D), F(glMapBufferOES, glMapBuffer), F(glUnmapBufferOES, glUnmapBuffer),
-    D(glCreateShader), D(glShaderSource), F(glCompileShader, g_glCompileShader), D(glDeleteShader), D(glGetShaderiv),
+    D(glCreateShader), F(glShaderSource, g_glShaderSource), F(glCompileShader, g_glCompileShader), D(glDeleteShader), D(glGetShaderiv),
     D(glGetShaderInfoLog), D(glGetShaderSource), D(glCreateProgram), D(glAttachShader), D(glBindAttribLocation),
     F(glLinkProgram, g_glLinkProgram), D(glUseProgram), D(glGetProgramiv), D(glGetProgramInfoLog), F(glValidateProgram, g_glNoop),
     D(glGetAttribLocation), D(glGetUniformLocation), D(glGetActiveAttrib), D(glGetActiveUniform),
