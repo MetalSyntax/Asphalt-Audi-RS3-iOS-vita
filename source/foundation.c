@@ -2570,7 +2570,7 @@ TABLE_END(foundation)
 // Constantes NSString de los frameworks que nadie implementó (NSFooKey, UIBarNotification, kCFBaz...):
 // una NSString con el nombre del símbolo, como hacen los frameworks de verdad (valores únicos).
 const import_entry *const_string_import(const char *name) {
-    static const char *pre[] = {"_NS", "_UI", "_kCF", "_kCA", "_kSec", "_GC", "_MP", "_AV", "_kAudio", "_kCG", "_CF"};
+    static const char *pre[] = {"_NS", "_UI", "_kCF", "_kCA", "_kSec", "_GC", "_MP", "_AV", "_kAudio", "_kCG", "_CF", "_GK"};
     static const char *suf[] = {"Key", "Notification", "Domain", "Name", "Type", "Mode", "Scope", "Exception",
                                 "Symbol", "Date", "Size", "Permissions", "Calendar", "Actions", "EaseInEaseOut",
                                 "Port", "Proxy", "Identifier", "Version", "Accessible", "Account", "Generic", "Service",

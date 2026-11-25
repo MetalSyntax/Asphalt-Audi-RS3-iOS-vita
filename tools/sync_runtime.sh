@@ -24,10 +24,12 @@ import json, sys
 src, dst = sys.argv[1:3]
 s = json.load(open(src + '/.psvita-toolkit.json')); d = json.load(open(dst + '/.psvita-toolkit.json'))
 t = open(src + '/CMakeLists.txt').read()
-t = t.replace('project(%s ' % s['slug'], 'project(%s ' % d['slug'])
+for k in ('project_name', 'slug'):
+    t = t.replace('project(%s ' % s[k], 'project(%s ' % d['project_name'])
+t = t.replace('ux0:data/%s/' % s['slug'], 'ux0:data/%s/' % d['slug'])
 t = t.replace('set(VITA_APP_NAME "%s")' % s['game_name'], 'set(VITA_APP_NAME "%s")' % d['game_name'])
 t = t.replace('set(VITA_TITLEID "%s")' % s['titleid'], 'set(VITA_TITLEID "%s")' % d['titleid'])
-t = t.replace('set(VITA_VPKNAME "%s")' % s['slug'], 'set(VITA_VPKNAME "%s")' % d['slug'])
+t = t.replace('set(VITA_VPKNAME "%s")' % s['project_name'], 'set(VITA_VPKNAME "%s")' % d['project_name'])
 open(dst + '/CMakeLists.txt', 'w').write(t)
 PY
 [ -f "$DST/vendor/vitaGL/libvitaGL.a" ] || cp "$SRC/vendor/vitaGL/libvitaGL.a" "$DST/vendor/vitaGL/"

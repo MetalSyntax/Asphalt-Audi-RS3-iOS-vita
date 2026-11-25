@@ -1279,10 +1279,12 @@ void __wrap_free(void *p) {
 extern void *cxx_seekg(void *is, long long off, int dir) __asm__("_ZNSi5seekgExSt12_Ios_Seekdir");
 static void *d_seekg(void *is, uint32_t lo, int32_t hi, int dir) { return cxx_seekg(is, ((int64_t)hi << 32) | lo, dir); }
 
+static void darwin_bcopy(const void *src, void *dst, size_t n) { memmove(dst, src, n); }
+
 const import_entry darwin_imports[] = {
     // memoria / cadenas
     D(malloc), D(calloc), D(realloc), D(free), D(memcpy), D(memmove), D(memset), D(memcmp), D(memchr),
-    D(memccpy), D(bzero), D(strlen), D(strnlen), D(strcmp), D(strncmp), D(strcpy), D(strncpy), D(strcat),
+    D(memccpy), D(bzero), F(bcopy, darwin_bcopy), D(strlen), D(strnlen), D(strcmp), D(strncmp), D(strcpy), D(strncpy), D(strcat),
     D(strncat), D(strchr), D(strrchr), D(strstr), D(strtok), D(strtok_r), D(strdup), D(strcasecmp),
     D(strncasecmp), D(strlcpy), D(strlcat), D(strspn), D(strcspn), D(strpbrk), D(strerror), D(atoi), D(atol),
     D(atoll), D(atof), D(strtol), D(strtoul), D(strtoll), D(strtoull), D(strtod), D(strtof), D(rand), D(srand),
