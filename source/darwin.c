@@ -473,22 +473,29 @@ static size_t d_fwrite(const void *p, size_t sz, size_t n, FILE *f) {
     return fwrite(p, sz, n, f);
 }
 static int d_putchar(int c) { return c; }
-static int d_swprintf(wchar_t *buf, size_t n, const wchar_t *fmt, ...) {
+static int d_vswprintf(wchar_t *buf, size_t n, const wchar_t *fmt, va_list ap) {
     // formato ancho -> angosto, darwin_vformat, y de vuelta (los juegos lo usan con %d/%s simples)
     char f8[512], o8[1024];
     size_t i = 0;
     for (; fmt[i] && i < sizeof(f8) - 1; i++)
         f8[i] = fmt[i] < 128 ? fmt[i] : '?';
     f8[i] = 0;
-    va_list ap;
-    va_start(ap, fmt);
-    words w = {&ap, NULL};
+    va_list cp;
+    va_copy(cp, ap);
+    words w = {&cp, NULL};
     int r = darwin_vformat(o8, sizeof(o8), f8, &w);
-    va_end(ap);
+    va_end(cp);
     for (i = 0; o8[i] && i + 1 < n; i++)
         buf[i] = (unsigned char)o8[i];
     if (n)
         buf[i] = 0;
+    return r;
+}
+static int d_swprintf(wchar_t *buf, size_t n, const wchar_t *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    int r = d_vswprintf(buf, n, fmt, ap);
+    va_end(ap);
     return r;
 }
 
@@ -1289,10 +1296,10 @@ const import_entry darwin_imports[] = {
     D(strncasecmp), D(strlcpy), D(strlcat), D(strspn), D(strcspn), D(strpbrk), D(strerror), D(atoi), D(atol),
     D(atoll), D(atof), D(strtol), D(strtoul), D(strtoll), D(strtoull), D(strtod), D(strtof), D(rand), D(srand),
     D(random), D(srandom), D(abs), D(labs), D(wcslen), D(wcscpy), D(wcsncpy), D(wcscmp), D(wcsncmp), D(wcscat),
-    D(wcschr), D(mbstowcs), D(wcstombs), D(towlower), D(towupper), D(tolower), D(toupper), D(isalpha), D(isdigit),
-    D(isspace), D(isupper), D(islower), D(isalnum), D(isprint), D(ispunct), D(isxdigit), D(sscanf),
+    D(wcschr), D(wcsstr), D(mbstowcs), D(wcstombs), D(towlower), D(towupper), D(tolower), D(toupper), D(isalpha), D(isdigit),
+    D(isspace), D(isupper), D(islower), D(isalnum), D(isprint), D(ispunct), D(isxdigit), D(sscanf), D(swscanf),
     F(sprintf, d_sprintf), F(snprintf, d_snprintf), F(vsprintf, d_vsprintf), F(vsnprintf, d_vsnprintf),
-    F(swprintf, d_swprintf), F(qsort, d_qsort), D(bsearch), F(__memcpy_chk, d___memcpy_chk),
+    F(swprintf, d_swprintf), F(vswprintf, d_vswprintf), D(wcstok), F(qsort, d_qsort), D(bsearch), F(__memcpy_chk, d___memcpy_chk),
     F(__memmove_chk, d___memmove_chk), F(__memset_chk, d___memset_chk), F(__strcpy_chk, d___strcpy_chk),
     F(__strcat_chk, d___strcat_chk), F(__strncpy_chk, d___strncpy_chk), F(__sprintf_chk, d___sprintf_chk),
     F(__snprintf_chk, d___snprintf_chk), F(__assert_rtn, d___assert_rtn), F(__error, d___error),
